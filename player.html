@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas MP4 Playlist Player</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+        }
+
+        body {
+            font-family: -apple-system, system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background: var(--card);
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+            background: #0f172a50;
+            padding: 15px;
+            border-radius: 12px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        button, .file-label {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+
+        .file-label { background: #475569; }
+
+        button:hover, .file-label:hover { opacity: 0.9; }
+
+        input[type="file"] { display: none; }
+
+        /* Speed Slider Styling */
+        input[type="range"] {
+            cursor: pointer;
+            accent-color: var(--primary);
+        }
+
+        .speed-label {
+            font-size: 0.85rem;
+            font-weight: bold;
+            color: var(--primary);
+            min-width: 40px;
+        }
+
+        #playlist {
+            list-style: none;
+            padding: 0;
+            background: #0f172a50;
+            border-radius: 8px;
+            max-height: 250px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+
+        #playlist li {
+            padding: 12px 15px;
+            border-bottom: 1px solid #334155;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #playlist li:last-child { border-bottom: none; }
+
+        #playlist li.active {
+            background: #6366f120;
+            border-left: 4px solid var(--primary);
+        }
+
+        #playlist li:hover { background: #334155; }
+
+        .status-msg {
+            font-size: 0.9rem;
+            color: #94a3b8;
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        .drag-hint {
+            border: 2px dashed #475569;
+            padding: 30px;
+            text-align: center;
+            border-radius: 12px;
+            margin-top: 20px;
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2 style="text-align: center; margin-top: 0;">Canvas Video Playlist</h2>
+        
+        <div class="canvas-wrapper">
+            <canvas id="video-canvas"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <button id="play-pause">Play</button>
+            </div>
+
+            <div class="control-group">
+                <label for="speed-control" style="font-size: 0.8rem; color: #94a3b8;">Speed:</label>
+                <input type="range" id="speed-control" min="0.5" max="2.0" step="0.1" value="1.0">
+                <span id="speed-val" class="speed-label">1.0x</span>
+            </div>
+
+            <div class="control-group" style="flex-grow: 1; justify-content: flex-end;">
+                <label class="file-label" for="file-input">Add MP4s</label>
+                <input type="file" id="file-input" accept="video/mp4" multiple>
+            </div>
+
+            <div style="width: 100%; border-top: 1px solid #334155; padding-top: 10px; font-size: 0.85rem; color: #94a3b8;">
+                Playing: <span id="current-title" style="color: #f8fafc;">None</span>
+            </div>
+        </div>
+
+        <ul id="playlist">
+            <!-- Playlist items injected here -->
+        </ul>
+
+        <div id="drop-zone" class="drag-hint">
+            Drop MP4 files here
+        </div>
+        
+        <p class="status-msg">Canvas handles the visual frame processing.</p>
+    </div>
+
+    <!-- Hidden video element for processing -->
+    <video id="hidden-video" style="display:none;" playsinline></video>
+
+    <script>
+        const canvas = document.getElementById('video-canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('hidden-video');
+        const playlistUI = document.getElementById('playlist');
+        const fileInput = document.getElementById('file-input');
+        const playBtn = document.getElementById('play-pause');
+        const titleDisplay = document.getElementById('current-title');
+        const dropZone = document.getElementById('drop-zone');
+        const speedControl = document.getElementById('speed-control');
+        const speedVal = document.getElementById('speed-val');
+
+        let playlist = [];
+        let currentIndex = -1;
+        let animationId = null;
+
+        // --- File Handling ---
+
+        function handleFiles(files) {
+            const newFiles = Array.from(files).filter(f => f.type === 'video/mp4');
+            
+            newFiles.forEach(file => {
+                const url = URL.createObjectURL(file);
+                playlist.push({
+                    name: file.name,
+                    url: url
+                });
+            });
+
+            renderPlaylist();
+            
+            if (currentIndex === -1 && playlist.length > 0) {
+                loadVideo(0);
+            }
+        }
+
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#6366f1';
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = '#475569';
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#475569';
+            handleFiles(e.dataTransfer.files);
+        });
+
+        // --- Video Control ---
+
+        function loadVideo(index) {
+            if (index < 0 || index >= playlist.length) return;
+            
+            currentIndex = index;
+            const item = playlist[index];
+            
+            video.src = item.url;
+            titleDisplay.textContent = item.name;
+            
+            // Set playback rate to the slider value immediately on load
+            video.playbackRate = parseFloat(speedControl.value);
+            
+            video.load();
+            video.play().catch(() => {
+                playBtn.textContent = "Play";
+            });
+
+            renderPlaylist();
+        }
+
+        function renderPlaylist() {
+            playlistUI.innerHTML = '';
+            playlist.forEach((item, index) => {
+                const li = document.createElement('li');
+                li.className = index === currentIndex ? 'active' : '';
+                li.innerHTML = `
+                    <span>${index + 1}. ${item.name}</span>
+                    <small>${index === currentIndex ? '▶ Playing' : ''}</small>
+                `;
+                li.onclick = () => loadVideo(index);
+                playlistUI.appendChild(li);
+            });
+        }
+
+        playBtn.addEventListener('click', () => {
+            if (video.paused) {
+                video.play();
+            } else {
+                video.pause();
+            }
+        });
+
+        // Playback Speed Handler
+        speedControl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            video.playbackRate = val;
+            speedVal.textContent = val.toFixed(1) + 'x';
+        });
+
+        video.addEventListener('play', () => {
+            playBtn.textContent = "Pause";
+            startDrawing();
+        });
+
+        video.addEventListener('pause', () => {
+            playBtn.textContent = "Play";
+            cancelAnimationFrame(animationId);
+        });
+
+        video.addEventListener('ended', () => {
+            let next = currentIndex + 1;
+            if (next < playlist.length) {
+                loadVideo(next);
+            }
+        });
+
+        // --- Canvas Rendering Loop ---
+
+        function startDrawing() {
+            if (video.paused || video.ended) return;
+
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                canvas.width = video.videoWidth || 1280;
+                canvas.height = video.videoHeight || 720;
+            }
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Canvas Overlay Info
+            ctx.fillStyle = "rgba(0,0,0,0.4)";
+            ctx.fillRect(10, 10, 180, 40);
+            ctx.fillStyle = "white";
+            ctx.font = "bold 14px sans-serif";
+            ctx.fillText(`Speed: ${video.playbackRate.toFixed(1)}x`, 20, 35);
+
+            animationId = requestAnimationFrame(startDrawing);
+        }
+
+        window.addEventListener('resize', () => {
+            if (!video.paused) startDrawing();
+        });
+    </script>
+</body>
+</html>
