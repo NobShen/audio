@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas MP4 Playlist Player</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --error: #ef4444;
+        }
+
+        body {
+            font-family: -apple-system, system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background: var(--card);
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            border: 1px solid #334155;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+            background: #0f172a50;
+            padding: 15px;
+            border-radius: 12px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .url-input-group {
+            width: 100%;
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            border-top: 1px solid #334155;
+            padding-top: 15px;
+        }
+
+        input[type="text"] {
+            flex-grow: 1;
+            background: #0f172a;
+            border: 1px solid #475569;
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            outline: none;
+            font-size: 0.9rem;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--primary);
+        }
+
+        button, .file-label {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .file-label { background: #475569; }
+
+        button:hover, .file-label:hover { opacity: 0.9; transform: translateY(-1px); }
+        button:active { transform: translateY(0); }
+
+        input[type="file"] { display: none; }
+
+        input[type="range"] {
+            cursor: pointer;
+            accent-color: var(--primary);
+        }
+
+        .speed-label {
+            font-size: 0.85rem;
+            font-weight: bold;
+            color: var(--primary);
+            min-width: 40px;
+        }
+
+        #playlist {
+            list-style: none;
+            padding: 0;
+            background: #0f172a50;
+            border-radius: 8px;
+            max-height: 250px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+
+        #playlist li {
+            padding: 12px 15px;
+            border-bottom: 1px solid #334155;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+        }
+
+        #playlist li:last-child { border-bottom: none; }
+
+        #playlist li.active {
+            background: #6366f120;
+            border-left: 4px solid var(--primary);
+        }
+
+        #playlist li:hover { background: #334155; }
+
+        .status-bar {
+            background: #0f172a;
+            padding: 8px 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.85rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #error-display {
+            color: var(--error);
+            display: none;
+            font-weight: bold;
+        }
+
+        .drag-hint {
+            border: 2px dashed #475569;
+            padding: 30px;
+            text-align: center;
+            border-radius: 12px;
+            margin-top: 20px;
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2 style="text-align: center; margin-top: 0; color: var(--primary);">Canvas Media Pro</h2>
+        
+        <div class="canvas-wrapper">
+            <canvas id="video-canvas"></canvas>
+        </div>
+
+        <div class="status-bar">
+            <div>Playing: <span id="current-title" style="color: var(--primary);">None</span></div>
+            <div id="error-display">⚠️ Media Error</div>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <button id="play-pause">Play</button>
+            </div>
+
+            <div class="control-group">
+                <label for="speed-control" style="font-size: 0.8rem; color: #94a3b8;">Speed:</label>
+                <input type="range" id="speed-control" min="0.5" max="2.0" step="0.1" value="1.0">
+                <span id="speed-val" class="speed-label">1.0x</span>
+            </div>
+
+            <div class="control-group" style="flex-grow: 1; justify-content: flex-end;">
+                <label class="file-label" for="file-input">Add Local Files</label>
+                <input type="file" id="file-input" accept="video/mp4" multiple>
+            </div>
+
+            <div class="url-input-group">
+                <input type="text" id="url-input" placeholder="Paste GitHub link (blob or raw) or any MP4 URL...">
+                <button id="add-url-btn">Add to List</button>
+            </div>
+        </div>
+
+        <ul id="playlist"></ul>
+
+        <div id="drop-zone" class="drag-hint">
+            Drop MP4 files here to add to playlist
+        </div>
+        
+        <p style="font-size: 0.8rem; color: #64748b; text-align: center; margin-top: 20px;">
+            Note: Standard GitHub links are automatically converted to raw format.
+        </p>
+    </div>
+
+    <!-- Hidden video element -->
+    <video id="hidden-video" style="display:none;" playsinline crossorigin="anonymous"></video>
+
+    <script>
+        const canvas = document.getElementById('video-canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('hidden-video');
+        const playlistUI = document.getElementById('playlist');
+        const fileInput = document.getElementById('file-input');
+        const urlInput = document.getElementById('url-input');
+        const addUrlBtn = document.getElementById('add-url-btn');
+        const playBtn = document.getElementById('play-pause');
+        const titleDisplay = document.getElementById('current-title');
+        const errorDisplay = document.getElementById('error-display');
+        const dropZone = document.getElementById('drop-zone');
+        const speedControl = document.getElementById('speed-control');
+        const speedVal = document.getElementById('speed-val');
+
+        let playlist = [];
+        let currentIndex = -1;
+        let animationId = null;
+
+        // --- URL Fixer for GitHub ---
+
+        function processUrl(url) {
+            let cleanUrl = url.trim();
+            
+            // Convert GitHub blob links to raw links automatically
+            // From: https://github.com/user/repo/blob/main/file.mp4
+            // To:   https://raw.githubusercontent.com/user/repo/main/file.mp4
+            if (cleanUrl.includes('github.com') && cleanUrl.includes('/blob/')) {
+                cleanUrl = cleanUrl
+                    .replace('github.com', 'raw.githubusercontent.com')
+                    .replace('/blob/', '/');
+            }
+            
+            return cleanUrl;
+        }
+
+        // --- File & URL Handling ---
+
+        function handleFiles(files) {
+            const newFiles = Array.from(files).filter(f => f.type.includes('video') || f.name.endsWith('.mp4'));
+            
+            newFiles.forEach(file => {
+                const url = URL.createObjectURL(file);
+                playlist.push({
+                    name: file.name,
+                    url: url,
+                    isLocal: true
+                });
+            });
+
+            renderPlaylist();
+            checkAutoPlay();
+        }
+
+        function handleAddUrl() {
+            const inputVal = urlInput.value.trim();
+            if (!inputVal) return;
+
+            const url = processUrl(inputVal);
+
+            // Extract a name
+            let fileName = url.split('/').pop().split('?')[0];
+            if (!fileName.toLowerCase().endsWith('.mp4') && !fileName.toLowerCase().endsWith('.webm')) {
+                fileName += '.mp4';
+            }
+
+            playlist.push({
+                name: "🌐 " + fileName,
+                url: url,
+                isLocal: false
+            });
+
+            urlInput.value = '';
+            renderPlaylist();
+            checkAutoPlay();
+        }
+
+        function checkAutoPlay() {
+            if (currentIndex === -1 && playlist.length > 0) {
+                loadVideo(0);
+            }
+        }
+
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+        addUrlBtn.addEventListener('click', handleAddUrl);
+        urlInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleAddUrl(); });
+
+        // Drag and Drop
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = '#6366f1'; });
+        dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#475569'; });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#475569';
+            handleFiles(e.dataTransfer.files);
+        });
+
+        // --- Video Control ---
+
+        function loadVideo(index) {
+            if (index < 0 || index >= playlist.length) return;
+            
+            errorDisplay.style.display = 'none';
+            currentIndex = index;
+            const item = playlist[index];
+            
+            video.playbackRate = parseFloat(speedControl.value);
+            video.src = item.url;
+            titleDisplay.textContent = item.name;
+            
+            video.load();
+            const playPromise = video.play();
+
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.warn("Autoplay blocked or load failed.");
+                    playBtn.textContent = "Play";
+                });
+            }
+
+            renderPlaylist();
+        }
+
+        function renderPlaylist() {
+            playlistUI.innerHTML = '';
+            playlist.forEach((item, index) => {
+                const li = document.createElement('li');
+                li.className = index === currentIndex ? 'active' : '';
+                li.innerHTML = `
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${index + 1}. ${item.name}</span>
+                    <small style="margin-left: 10px; flex-shrink: 0;">${index === currentIndex ? '▶ PLAYING' : ''}</small>
+                `;
+                li.onclick = () => loadVideo(index);
+                playlistUI.appendChild(li);
+            });
+        }
+
+        playBtn.addEventListener('click', () => {
+            if (video.paused) video.play();
+            else video.pause();
+        });
+
+        speedControl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            video.playbackRate = val;
+            speedVal.textContent = val.toFixed(1) + 'x';
+        });
+
+        video.addEventListener('play', () => {
+            playBtn.textContent = "Pause";
+            startDrawing();
+        });
+
+        video.addEventListener('pause', () => {
+            playBtn.textContent = "Play";
+            cancelAnimationFrame(animationId);
+        });
+
+        video.addEventListener('ended', () => {
+            let next = currentIndex + 1;
+            if (next < playlist.length) loadVideo(next);
+        });
+
+        // Error Handling
+        video.addEventListener('error', (e) => {
+            console.error("Video error:", video.error);
+            errorDisplay.style.display = 'block';
+            errorDisplay.textContent = `⚠️ Error: ${getErrorMessage(video.error.code)}`;
+        });
+
+        function getErrorMessage(code) {
+            switch(code) {
+                case 1: return "Aborted";
+                case 2: return "Network Issue";
+                case 3: return "Decode Error";
+                case 4: return "Format/URL Not Supported";
+                default: return "Unknown";
+            }
+        }
+
+        // --- Canvas Rendering Loop ---
+
+        function startDrawing() {
+            if (video.paused || video.ended) return;
+
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                canvas.width = video.videoWidth || 1280;
+                canvas.height = video.videoHeight || 720;
+            }
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Canvas Overlay Info
+            ctx.fillStyle = "rgba(0,0,0,0.5)";
+            ctx.fillRect(10, 10, 160, 35);
+            ctx.fillStyle = "white";
+            ctx.font = "bold 12px sans-serif";
+            ctx.fillText(`SPEED: ${video.playbackRate.toFixed(1)}x`, 20, 32);
+
+            animationId = requestAnimationFrame(startDrawing);
+        }
+
+        window.addEventListener('resize', () => { if (!video.paused) startDrawing(); });
+    </script>
+</body>
+</html>
